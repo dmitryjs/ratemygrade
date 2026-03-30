@@ -4,10 +4,13 @@ import Link from "next/link"
 
 export default function Page() {
   return (
-    <main className="min-h-svh px-4 py-6 sm:py-10">
-      <div className="relative mx-auto w-full max-w-5xl">
+    <main className="min-h-svh px-4 py-6 sm:px-10 sm:py-10 lg:px-[120px]">
+      <div className="relative mx-auto w-full max-w-none">
         <div className="absolute left-0 top-0 sm:left-0 sm:top-0">
           <ThemeToggleTabs />
+        </div>
+        <div className="absolute right-0 top-0 font-mono text-[14px] font-medium tracking-tight text-foreground/50">
+          v1.0
         </div>
         <header className="pt-10 text-center sm:pt-0">
           {/* Mobile: whole logo is clickable */}
