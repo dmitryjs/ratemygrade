@@ -205,7 +205,7 @@ export function GradeMatrix() {
         <Table containerClassName="no-scrollbar overflow-y-hidden">
           <TableHeader>
             <TableRow>
-              <TableHead className="sticky left-0 z-20 min-w-[220px] bg-card">
+              <TableHead className="w-[120px] min-w-[120px] max-w-[120px] whitespace-normal break-words sm:sticky sm:left-0 sm:z-20 sm:w-[160px] sm:min-w-[160px] sm:max-w-[160px] sm:bg-card">
                 Компетенция
               </TableHead>
               {grades.map((g) => (
@@ -218,7 +218,7 @@ export function GradeMatrix() {
           <TableBody>
             {competencies.map((c) => (
               <TableRow key={c.id} className="align-top">
-                <TableCell className="sticky left-0 z-10 bg-card font-medium">
+                <TableCell className="w-[120px] min-w-[120px] max-w-[120px] whitespace-normal break-words font-medium sm:sticky sm:left-0 sm:z-10 sm:w-[160px] sm:min-w-[160px] sm:max-w-[160px] sm:bg-card">
                   {c.title}
                 </TableCell>
                 {grades.map((g) => (
