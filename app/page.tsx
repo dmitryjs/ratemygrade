@@ -1,18 +1,41 @@
 import { GradeMatrix } from "@/components/grade-matrix"
 import { ThemeToggleTabs } from "@/components/theme-toggle-tabs"
+import Link from "next/link"
 
 export default function Page() {
   return (
-    <main className="min-h-svh px-4 py-10">
+    <main className="min-h-svh px-4 py-6 sm:py-10">
       <div className="relative mx-auto w-full max-w-5xl">
-        <div className="absolute left-0 top-0">
+        <div className="absolute left-0 top-0 sm:left-0 sm:top-0">
           <ThemeToggleTabs />
         </div>
-        <header className="text-center">
-          <div className="font-mono text-[14px] font-medium tracking-tight text-foreground">
-            ratemygrade
+        <header className="pt-10 text-center sm:pt-0">
+          {/* Mobile: whole logo is clickable */}
+          <Link
+            href="https://www.threads.com/@dmitry.gallkin?igshid=NTc4MTIwNjQ2YQ=="
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block sm:hidden"
+          >
+            <div className="space-y-0.5 font-mono text-[14px] font-medium tracking-tight">
+              <div className="text-foreground">ratemygrate</div>
+              <div className="text-foreground/50">by dmitry galkin</div>
+            </div>
+          </Link>
+
+          {/* Desktop: only the byline is a link */}
+          <div className="hidden space-y-0.5 font-mono text-[14px] font-medium tracking-tight sm:block">
+            <div className="text-foreground">ratemygrate</div>
+            <Link
+              href="https://www.threads.com/@dmitry.gallkin?igshid=NTc4MTIwNjQ2YQ=="
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground/50 underline-offset-4 hover:underline"
+            >
+              by dmitry galkin
+            </Link>
           </div>
-          <h1 className="mt-20 font-sans text-[16px] font-semibold text-foreground">
+          <h1 className="mt-10 font-sans text-[16px] font-semibold text-foreground sm:mt-20">
             Определи свой грейд
           </h1>
           <p className="mx-auto mt-2 max-w-3xl font-sans text-[14px] leading-[140%] text-foreground/50">

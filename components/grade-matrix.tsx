@@ -175,11 +175,11 @@ export function GradeMatrix() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="text-sm text-foreground/70">
           Выбрано пунктов: <span className="font-medium">{selectedCount}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 sm:w-auto sm:justify-end">
           <Button
             variant="outline"
             disabled={isLoading || selectedCount === 0}
@@ -191,7 +191,11 @@ export function GradeMatrix() {
           >
             Сбросить
           </Button>
-          <Button disabled={isLoading || selectedCount === 0} onClick={onSubmit}>
+          <Button
+            className="flex-1 sm:flex-none"
+            disabled={isLoading || selectedCount === 0}
+            onClick={onSubmit}
+          >
             {isLoading ? "Считаем…" : "Рассчитать"}
           </Button>
         </div>
@@ -239,7 +243,7 @@ export function GradeMatrix() {
       </Card>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[85svh] overflow-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Результаты</DialogTitle>
             <DialogDescription>
