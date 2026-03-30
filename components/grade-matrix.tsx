@@ -70,7 +70,7 @@ function ItemButton({
       type="button"
       onClick={() => onToggle(id)}
       className={cn(
-        "block w-full rounded-md border px-2 py-1.5 text-left text-[12px] leading-snug transition-colors",
+        "block w-full rounded-md border px-2 py-1.5 text-left text-[16px] leading-snug transition-colors sm:text-[12px]",
         "hover:bg-muted",
         selected
           ? "border-emerald-500/70 bg-emerald-200/70 text-foreground dark:border-emerald-400/80 dark:bg-emerald-500/25"
@@ -214,7 +214,7 @@ export function GradeMatrix() {
               {grades.map((g) => (
                 <TableHead
                   key={g.key}
-                  className="w-[450px] min-w-[450px] max-w-[450px] whitespace-normal break-words sm:w-auto sm:min-w-[240px] sm:max-w-none sm:whitespace-nowrap"
+                  className="w-[260px] min-w-[260px] max-w-[260px] whitespace-normal break-words sm:w-auto sm:min-w-[240px] sm:max-w-none sm:whitespace-nowrap"
                 >
                   {g.label}
                 </TableHead>
@@ -230,7 +230,7 @@ export function GradeMatrix() {
                 {grades.map((g) => (
                   <TableCell
                     key={g.key}
-                    className="w-[450px] min-w-[450px] max-w-[450px] align-top whitespace-normal break-words sm:w-auto sm:min-w-[240px] sm:max-w-none sm:whitespace-nowrap"
+                    className="w-[260px] min-w-[260px] max-w-[260px] align-top whitespace-normal break-words sm:w-auto sm:min-w-[240px] sm:max-w-none sm:whitespace-nowrap"
                   >
                     <div className="space-y-2">
                       {c.cells[g.key as GradeKey].map((it) => (
