@@ -202,7 +202,10 @@ export function GradeMatrix() {
       </div>
 
       <Card className="overflow-hidden">
-        <Table containerClassName="no-scrollbar overflow-y-hidden">
+        <Table
+          className="table-fixed sm:table-auto"
+          containerClassName="no-scrollbar overflow-y-hidden"
+        >
           <TableHeader>
             <TableRow>
               <TableHead className="w-[120px] min-w-[120px] max-w-[120px] whitespace-normal break-words sm:sticky sm:left-0 sm:z-20 sm:w-[160px] sm:min-w-[160px] sm:max-w-[160px] sm:bg-card">
@@ -211,7 +214,7 @@ export function GradeMatrix() {
               {grades.map((g) => (
                 <TableHead
                   key={g.key}
-                  className="w-[450px] min-w-[450px] max-w-[450px] sm:w-auto sm:min-w-[240px] sm:max-w-none"
+                  className="w-[450px] min-w-[450px] max-w-[450px] whitespace-normal break-words sm:w-auto sm:min-w-[240px] sm:max-w-none sm:whitespace-nowrap"
                 >
                   {g.label}
                 </TableHead>
@@ -227,7 +230,7 @@ export function GradeMatrix() {
                 {grades.map((g) => (
                   <TableCell
                     key={g.key}
-                    className="w-[450px] min-w-[450px] max-w-[450px] align-top sm:w-auto sm:min-w-[240px] sm:max-w-none"
+                    className="w-[450px] min-w-[450px] max-w-[450px] align-top whitespace-normal break-words sm:w-auto sm:min-w-[240px] sm:max-w-none sm:whitespace-nowrap"
                   >
                     <div className="space-y-2">
                       {c.cells[g.key as GradeKey].map((it) => (
