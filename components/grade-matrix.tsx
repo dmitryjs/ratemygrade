@@ -209,7 +209,10 @@ export function GradeMatrix() {
                 Компетенция
               </TableHead>
               {grades.map((g) => (
-                <TableHead key={g.key} className="min-w-[240px]">
+                <TableHead
+                  key={g.key}
+                  className="w-[450px] min-w-[450px] max-w-[450px] sm:w-auto sm:min-w-[240px] sm:max-w-none"
+                >
                   {g.label}
                 </TableHead>
               ))}
@@ -222,7 +225,10 @@ export function GradeMatrix() {
                   {c.title}
                 </TableCell>
                 {grades.map((g) => (
-                  <TableCell key={g.key} className="align-top">
+                  <TableCell
+                    key={g.key}
+                    className="w-[450px] min-w-[450px] max-w-[450px] align-top sm:w-auto sm:min-w-[240px] sm:max-w-none"
+                  >
                     <div className="space-y-2">
                       {c.cells[g.key as GradeKey].map((it) => (
                         <ItemButton
