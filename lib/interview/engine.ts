@@ -53,19 +53,67 @@ function isGradeRelevant(question: Question): boolean {
   return question.gradeRelevant !== false && question.phase !== "compensation"
 }
 
+function answerMentionsSkip(answer: InterviewAnswer): boolean {
+  return isSkipExample(answer.text) || answer.evidence === "Пример пропущен"
+}
+
+/** Real work example — not a skipped open answer and not a bare option label. */
+function hasConcreteExample(answer: InterviewAnswer, answers: InterviewAnswer[] = []): boolean {
+  const question = getQuestion(answer.questionId, answers)
+  if (!question || !isGradeRelevant(question)) return false
+  if (question.kind !== "open" && question.kind !== "hybrid") return false
+  if (answerMentionsSkip(answer)) return false
+  if (answer.confidence === "low" && (answer.text?.length ?? 0) < 80) return false
+
+  const raw = (answer.text ?? "").replace(/\s+/g, " ").trim()
+  if (raw.length < 40) return false
+
+  // Strip selected option label — leftover must still look like an example.
+  if (question.options.length > 0) {
+    let remainder = raw
+    for (const option of question.options) {
+      const escaped = option.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      remainder = remainder
+        .replace(new RegExp(`^${escaped}\\.?\\s*`, "i"), "")
+        .replace(new RegExp(`^${option.id}\\s*[.)]?\\s*`, "i"), "")
+        .trim()
+    }
+    if (remainder.length < 40) return false
+    if (isSkipExample(remainder)) return false
+  }
+
+  return true
+}
+
+function cappedSelfReportScore(score: 0 | 1 | 2 | 3 | 4 | undefined): 0 | 1 | 2 | 3 | 4 | undefined {
+  if (score === undefined) return undefined
+  // Self-rating without a concrete example cannot claim senior/lead signals.
+  return Math.min(score, 2) as 0 | 1 | 2 | 3 | 4
+}
+
 function dimScore(answers: InterviewAnswer[], id: DimensionId): number {
   const values: number[] = []
   for (const answer of answers) {
     const question = getQuestion(answer.questionId, answers)
     if (!question || !isGradeRelevant(question)) continue
+
+    const concrete = hasConcreteExample(answer, answers)
+    if (answerMentionsSkip(answer) && !concrete) {
+      // Skipped example: weak negative evidence, not a middle/senior claim.
+      if (question.dimension === id || question.extraDimensions?.includes(id)) {
+        values.push(1)
+      }
+      continue
+    }
+
     const fromSignal = answer.signals?.[id]
     if (fromSignal !== undefined) {
-      values.push(fromSignal)
+      values.push(concrete ? fromSignal : Math.min(fromSignal, 2))
       continue
     }
     if (answer.score === undefined) continue
     if (question.dimension === id || question.extraDimensions?.includes(id)) {
-      values.push(answer.score)
+      values.push(concrete ? answer.score : Math.min(answer.score, 2))
     }
   }
   if (values.length === 0) return 0
@@ -82,10 +130,13 @@ function dimConfidence(answers: InterviewAnswer[], id: DimensionId): number {
       question.extraDimensions?.includes(id)
     )
   })
-  if (relevant.length === 0) return 0.4
-  const mapped = relevant.map((answer) =>
-    answer.confidence === "high" ? 0.9 : answer.confidence === "low" ? 0.45 : 0.7
-  )
+  if (relevant.length === 0) return 0.35
+  const mapped = relevant.map((answer) => {
+    if (answerMentionsSkip(answer) || !hasConcreteExample(answer, answers)) return 0.35
+    if (answer.confidence === "high") return 0.9
+    if (answer.confidence === "low") return 0.45
+    return 0.7
+  })
   return mapped.reduce((sum, value) => sum + value, 0) / mapped.length
 }
 
@@ -105,27 +156,21 @@ function baseGrade(score: number): Grade {
   return "Junior"
 }
 
-function isSubstantialExample(answer: InterviewAnswer): boolean {
-  const question = getQuestion(answer.questionId)
-  if (!question) return false
-  if (question.kind !== "open" && question.kind !== "hybrid") return false
-  if (question.gradeRelevant === false || question.phase === "compensation") return false
-  if (isSkipExample(answer.text)) return false
-  if (answer.confidence === "low") return false
-  if ((answer.text?.length ?? 0) < 80) return false
+function isSubstantialExample(answer: InterviewAnswer, answers: InterviewAnswer[] = []): boolean {
+  if (!hasConcreteExample(answer, answers)) return false
   return (answer.score ?? 0) >= 2
 }
 
 function countEvidence(answers: InterviewAnswer[]): number {
-  return answers.filter(isSubstantialExample).length
+  return answers.filter((answer) => isSubstantialExample(answer, answers)).length
 }
 
 function hasSignal(answers: InterviewAnswer[], id: DimensionId, min: number): boolean {
   return answers.some((answer) => {
-    if (!isSubstantialExample(answer)) return false
+    if (!isSubstantialExample(answer, answers)) return false
     const fromSignal = answer.signals?.[id]
     if (fromSignal !== undefined) return fromSignal >= min
-    const question = getQuestion(answer.questionId)
+    const question = getQuestion(answer.questionId, answers)
     if (!question) return false
     if (question.dimension !== id && !question.extraDimensions?.includes(id)) return false
     return (answer.score ?? 0) >= min
@@ -138,12 +183,21 @@ function applyGates(score: number, answers: InterviewAnswer[]): Grade {
   const evidence = countEvidence(answers)
   const staffExamples = answers.filter(
     (answer) =>
-      isSubstantialExample(answer) &&
+      isSubstantialExample(answer, answers) &&
       ((answer.signals?.scope_ownership ?? 0) >= 4 ||
         (answer.signals?.influence ?? 0) >= 4 ||
         (answer.signals?.systems_thinking ?? 0) >= 4 ||
         (answer.score ?? 0) >= 4)
   ).length
+
+  // No real work examples → cannot claim Middle+ from option self-ratings alone.
+  if (evidence === 0) return "Junior"
+  if (evidence === 1 && (grade === "Senior" || grade === "Senior+" || grade === "Lead" || grade === "Lead IC" || grade === "Staff / Principal")) {
+    grade = score >= 42 ? "Strong Middle" : "Middle"
+  }
+  if (evidence < 3 && (grade === "Senior" || grade === "Senior+")) {
+    grade = score >= 42 ? "Strong Middle" : "Middle"
+  }
 
   if (grade === "Staff / Principal") {
     const ok =
@@ -182,6 +236,11 @@ function applyGates(score: number, answers: InterviewAnswer[]): Grade {
         d("systems_thinking") >= 3 ||
         d("ux_complexity") >= 3)
     if (!ok) grade = score >= 42 ? "Strong Middle" : "Middle"
+  }
+
+  if (evidence < 2 && (grade === "Middle" || grade === "Strong Middle")) {
+    // One thin example is not enough for a confident Middle claim from selects.
+    if (evidence === 0) return "Junior"
   }
 
   return grade
@@ -288,7 +347,245 @@ function expectation(grade: Grade): number {
   return 3.5
 }
 
+const DIMENSION_COACHING: Record<
+  DimensionId,
+  {
+    strength: (score: number) => string
+    gap: (nextGrade: string, score: number) => string
+    action: (nextGrade: string) => string
+  }
+> = {
+  scope_ownership: {
+    strength: (score) =>
+      `В ответах видно ownership шире одной фичи (${score.toFixed(1)}/4): вы тянете проблему целиком, а не только макеты.`,
+    gap: (nextGrade, score) =>
+      `Сейчас ownership звучит локально (${score.toFixed(1)}/4). Для ${nextGrade} нужен кейс, где вы держали проблему end-to-end: от формулировки до результата после релиза.`,
+    action: (nextGrade) =>
+      `Возьмите одну проблему продукта целиком: сами зафиксируйте success criteria, scope и trade-offs, а через 4–6 недель сравните «до/после» — это типичный сигнал ${nextGrade}.`,
+  },
+  autonomy: {
+    strength: (score) =>
+      `По ответам видно, что вы не ждёте ТЗ на каждый шаг (${score.toFixed(1)}/4) и сами доводите решение.`,
+    gap: (nextGrade, score) =>
+      `Автономия пока выглядит как выполнение поставленной задачи (${score.toFixed(1)}/4). На уровне ${nextGrade} важно самому формулировать подход, когда входные данные шумные.`,
+    action: (nextGrade) =>
+      `В следующей задаче без готового brief сами соберите контекст, предложите 2 подхода с плюсами/минусами и защитите выбор перед PM/инженерами — без ожидания готового ТЗ.`,
+  },
+  product_thinking: {
+    strength: (score) =>
+      `В примерах есть связка «пользователь → решение → бизнес» (${score.toFixed(1)}/4), а не только UI.`,
+    gap: (nextGrade, score) =>
+      `Пока мало доказательств, что вы меняете продуктовую постановку, а не только оформление (${score.toFixed(1)}/4). Для ${nextGrade} нужен кейс с гипотезой и проверкой.`,
+    action: (nextGrade) =>
+      `Выберите спорную продуктовую гипотезу: опишите допущения, минимальный эксперимент и критерий «убить/оставить» до старта дизайна — и пройдите этот цикл до решения.`,
+  },
+  impact_metrics: {
+    strength: (score) =>
+      `В кейсах есть опора на измеримый эффект (${score.toFixed(1)}/4), а не только «стало удобнее».`,
+    gap: (nextGrade, score) =>
+      `Эффект пока описан словами, без цифр или baseline (${score.toFixed(1)}/4). Для ${nextGrade} почти всегда ждут «было → стало» по метрике.`,
+    action: () =>
+      `До старта работы зафиксируйте 1 метрику успеха и baseline. После релиза сравните факт с целью и коротко разберите, что сработало, а что нет.`,
+  },
+  ux_complexity: {
+    strength: (score) =>
+      `Вы тянете неоднозначные UX-сценарии (${score.toFixed(1)}/4), а не только линейные экраны.`,
+    gap: (nextGrade, score) =>
+      `В интервью мало примеров сложного UX: ветвления, состояний ошибок, ролей, edge cases (${score.toFixed(1)}/4). Для ${nextGrade} это важный маркер.`,
+    action: () =>
+      `Возьмите поток с несколькими ролями или тяжёлыми ошибками: отдельно проработайте empty/loading/error/edge states и покажите, как решение масштабируется за пределы happy path.`,
+  },
+  systems_thinking: {
+    strength: (score) =>
+      `Видно мышление системами и повторяемыми паттернами (${score.toFixed(1)}/4), а не разовыми экранами.`,
+    gap: (nextGrade, score) =>
+      `Пока решения звучат как разовые экраны (${score.toFixed(1)}/4). Для ${nextGrade} нужен пример, где вы улучшили систему/паттерн для нескольких команд или потоков.`,
+    action: () =>
+      `Найдите повторяющийся UX-паттерн в продукте, опишите правила и ограничения и внедрите его минимум в 2–3 сценария — чтобы решение жило без вашего ручного контроля.`,
+  },
+  delivery_qa: {
+    strength: (score) =>
+      `Есть сигнал, что вы доводите качество до продакшена (${score.toFixed(1)}/4), а не останавливаетесь на макете.`,
+    gap: (nextGrade, score) =>
+      `Мало примеров design QA и доведения до релиза (${score.toFixed(1)}/4). Для ${nextGrade} важно показать контроль качества после handoff.`,
+    action: () =>
+      `На ближайшем релизе ведите чеклист design QA: расхождения с билдом, состояния, копирайт. Зафиксируйте 3–5 найденных багов и как вы их закрыли с инженерами.`,
+  },
+  research: {
+    strength: (score) =>
+      `Исследования в ответах выглядят прикладными (${score.toFixed(1)}/4): не «для галочки», а влияющими на решение.`,
+    gap: (nextGrade, score) =>
+      `Пока слабо видно, как исследование меняло решение (${score.toFixed(1)}/4). Для ${nextGrade} нужен кейс «инсайт → изменение скоупа/UX».`,
+    action: () =>
+      `Сделайте короткий research-цикл (5–7 интервью или тест): выпишите 3 инсайта, что именно изменили в решении и почему отклонили альтернативы.`,
+  },
+  product_judgment: {
+    strength: (score) =>
+      `В ответах есть зрелые trade-offs (${score.toFixed(1)}/4): вы умеете сказать «нет» ради фокуса.`,
+    gap: (nextGrade, score) =>
+      `Пока мало примеров жёсткого продуктового суждения (${score.toFixed(1)}/4). Для ${nextGrade} важен кейс, где вы сознательно сузили scope.`,
+    action: () =>
+      `В следующей инициативе явно отрежьте 1–2 «хотелки»: запишите критерий отсечения, кого убедили и какой риск сняли этим решением.`,
+  },
+  influence: {
+    strength: (score) =>
+      `Есть признаки влияния без формальной власти (${score.toFixed(1)}/4): согласования, конфликты, совместные решения.`,
+    gap: (nextGrade, score) =>
+      `Влияние пока звучит слабо (${score.toFixed(1)}/4). Для ${nextGrade} нужен пример, где вы сдвинули позицию PM/инженеров/стейкхолдеров.`,
+    action: () =>
+      `Возьмите спорный дизайн-решение: подготовьте одностраничный аргумент (проблема, опции, риск) и доведите согласование до явного «go» с другой функцией.`,
+  },
+  leadership: {
+    strength: (score) =>
+      `В кейсах есть лидерский след (${score.toFixed(1)}/4): вы поднимаете качество работы вокруг себя.`,
+    gap: (nextGrade, score) =>
+      `Лидерских сигналов мало (${score.toFixed(1)}/4). Для ${nextGrade} важен пример, где вы улучшили работу других, а не только свой output.`,
+    action: () =>
+      `Запустите маленький ритуал для команды (дизайн-критика, QA-сессия, шаблон handoff) и через месяц покажите, что изменилось в качестве или скорости.`,
+  },
+  technical_fluency: {
+    strength: (score) =>
+      `Технический диалог в ответах уверенный (${score.toFixed(1)}/4): ограничения платформы учитываются в решении.`,
+    gap: (nextGrade, score) =>
+      `Техническая глубина пока поверхностная (${score.toFixed(1)}/4). Для ${nextGrade} полезен кейс с constraint-driven design.`,
+    action: () =>
+      `В ближайшей фиче заранее сядьте с инженером: зафиксируйте 2–3 технических ограничения и покажите, как они изменили UX до финального макета.`,
+  },
+  ambiguity: {
+    strength: (score) =>
+      `Вы спокойно работаете в тумане (${score.toFixed(1)}/4): структурируете неопределённость, а не ждёте идеального brief.`,
+    gap: (nextGrade, score) =>
+      `Пока мало примеров работы с высокой неопределённостью (${score.toFixed(1)}/4). Для ${nextGrade} нужен кейс «было непонятно → стал понятен план».`,
+    action: () =>
+      `Возьмите задачу без чёткого brief: за 1–2 дня соберите карту неизвестных, приоритеты discovery и первый проверяемый шаг — и согласуйте это с командой.`,
+  },
+}
+
+function evidenceSnippet(answers: InterviewAnswer[], dimensionId: DimensionId): string | undefined {
+  for (const answer of answers) {
+    const question = getQuestion(answer.questionId, answers)
+    if (!question || !isGradeRelevant(question)) continue
+    const related =
+      answer.signals?.[dimensionId] !== undefined ||
+      question.dimension === dimensionId ||
+      question.extraDimensions?.includes(dimensionId)
+    if (!related) continue
+    if (!hasConcreteExample(answer, answers)) continue
+
+    let text = (answer.evidence || answer.text || "").replace(/\s+/g, " ").trim()
+    for (const option of question.options) {
+      const escaped = option.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      text = text.replace(new RegExp(`^${escaped}\\.?\\s*`, "i"), "").trim()
+    }
+    if (text.length < 40) continue
+    if (question.options.some((option) => option.label.toLowerCase() === text.toLowerCase())) {
+      continue
+    }
+    return text.slice(0, 120)
+  }
+  return undefined
+}
+
+function dimensionHasEvidence(answers: InterviewAnswer[], id: DimensionId): boolean {
+  return answers.some((answer) => {
+    if (!hasConcreteExample(answer, answers)) return false
+    const question = getQuestion(answer.questionId, answers)
+    if (!question) return false
+    return (
+      answer.signals?.[id] !== undefined ||
+      question.dimension === id ||
+      question.extraDimensions?.includes(id)
+    )
+  })
+}
+
+function buildInsufficientEvidenceGrowth(
+  dimensions: DimensionScore[],
+  answers: InterviewAnswer[]
+): GradeResult["growthAreas"] {
+  const weak = [...dimensions]
+    .sort((a, b) => a.score - b.score || a.confidence - b.confidence)
+    .slice(0, 3)
+
+  return weak.map((item) => {
+    const relatedSkip = answers.some((answer) => {
+      const question = getQuestion(answer.questionId, answers)
+      if (!question) return false
+      const related =
+        question.dimension === item.id || question.extraDimensions?.includes(item.id)
+      return related && answerMentionsSkip(answer)
+    })
+    const coach = DIMENSION_COACHING[item.id]
+    return {
+      title: item.name,
+      reason: relatedSkip
+        ? `По «${item.name.toLowerCase()}» пример был пропущен, поэтому оценка здесь почти наугад (${item.score.toFixed(1)}/4). Самооценка вариантом ответа не считается доказательством.`
+        : `По «${item.name.toLowerCase()}» нет рабочего кейса из интервью (${item.score.toFixed(1)}/4) — только выбор из списка или общие формулировки.`,
+      nextStep: coach.action("следующего уровня"),
+    }
+  })
+}
+
+function buildNextGradeActions(
+  grade: Grade,
+  nextGrade: string,
+  growthIds: DimensionId[],
+  evidenceCount: number
+): string[] {
+  if (evidenceCount === 0) {
+    return [
+      "Пройдите опрос ещё раз с 3–4 реальными кейсами: задача, что сделали вы, чем закончилось.",
+      "Для каждого кейса добавьте «было → стало» хотя бы одной метрикой или наблюдаемым эффектом.",
+      "Не опирайтесь только на номер варианта — без примера система специально занижает уверенность и грейд.",
+    ]
+  }
+
+  const actions: string[] = []
+  const set = new Set(growthIds)
+
+  if (set.has("impact_metrics") || set.has("product_thinking")) {
+    actions.push(
+      `Соберите 1 кейс «гипотеза → релиз → метрика»: baseline, изменение и вывод — без этого сложно убедительно претендовать на ${nextGrade}.`
+    )
+  }
+  if (set.has("scope_ownership") || set.has("autonomy") || set.has("ambiguity")) {
+    actions.push(
+      `Возьмите инициативу без готового ТЗ и доведите её до решения: ваш вклад должен быть виден в постановке, а не только в финальных экранах.`
+    )
+  }
+  if (set.has("influence") || set.has("leadership") || set.has("systems_thinking")) {
+    actions.push(
+      `Покажите эффект шире личного output: сдвиг стейкхолдеров, паттерн для нескольких команд или процесс, который работает без вас.`
+    )
+  }
+  if (set.has("ux_complexity") || set.has("delivery_qa") || set.has("technical_fluency")) {
+    actions.push(
+      `Добавьте в портфель один «тяжёлый» поток: сложные состояния, QA после handoff или дизайн под технические ограничения.`
+    )
+  }
+  if (set.has("research") || set.has("product_judgment")) {
+    actions.push(
+      `Зафиксируйте решение, которое вы изменили после evidence: что узнали, что отрезали и почему.`
+    )
+  }
+
+  if (actions.length === 0) {
+    actions.push(
+      `За 90 дней соберите 2 сильных кейса уровня ${nextGrade}: ownership проблемы и измеримый эффект после релиза.`
+    )
+  }
+
+  if (grade === "Senior" || grade === "Senior+" || grade === "Lead IC" || grade === "Lead") {
+    actions.push(
+      `Упакуйте один системный кейс: проблема нескольких команд, ваш подход и что осталось работать после вашего выхода.`
+    )
+  }
+
+  return [...new Set(actions)].slice(0, 3)
+}
+
 function buildLocalResult(answers: InterviewAnswer[]): GradeResult {
+  const evidenceCount = countEvidence(answers)
   const score = weightedScore(answers)
   const grade = applyGates(score, answers)
   const dimensions: DimensionScore[] = (Object.keys(DIMENSION_META) as DimensionId[]).map(
@@ -299,29 +596,53 @@ function buildLocalResult(answers: InterviewAnswer[]): GradeResult {
       confidence: Number(dimConfidence(answers, id).toFixed(2)),
     })
   )
-  const overallConfidence =
+  const rawConfidence =
     dimensions.reduce((sum, item) => sum + item.confidence, 0) / dimensions.length
+  // Sparse evidence must dominate the confidence number users see.
+  const evidenceFactor =
+    evidenceCount === 0 ? 0.45 : evidenceCount === 1 ? 0.65 : evidenceCount === 2 ? 0.8 : 1
+  const overallConfidence = Math.min(rawConfidence, rawConfidence * evidenceFactor)
   const nextGrade = nextGradeFor(grade)
   const bar = expectation(grade)
+  const lowEvidence = evidenceCount < 2
 
   const strengths = [...dimensions]
     .sort((a, b) => b.score - a.score)
-    .filter((item) => item.score >= 2.6)
+    .filter((item) => item.score >= 2.6 && dimensionHasEvidence(answers, item.id))
     .slice(0, 3)
-    .map((item) => ({
-      title: item.name,
-      reason: `По примерам из интервью это выглядит устойчиво: ${item.score.toFixed(1)}/4.`,
-    }))
+    .map((item) => {
+      const coach = DIMENSION_COACHING[item.id]
+      const snippet = evidenceSnippet(answers, item.id)
+      return {
+        title: item.name,
+        reason: snippet
+          ? `${coach.strength(item.score)} Например: «${snippet}${snippet.length >= 120 ? "…" : ""}».`
+          : coach.strength(item.score),
+      }
+    })
 
-  const growthAreas = [...dimensions]
-    .sort((a, b) => a.score - b.score)
-    .filter((item) => item.score < bar + 0.4)
+  const weakDimensions = [...dimensions]
+    .sort((a, b) => a.score - b.score || a.confidence - b.confidence)
+    .filter((item) => item.score < bar + 0.4 || !dimensionHasEvidence(answers, item.id))
     .slice(0, 3)
-    .map((item) => ({
-      title: item.name,
-      reason: `Пока мало конкретных примеров на уровне ${nextGrade}.`,
-      nextStep: `Возьмите 1–2 задачи, где придётся проявить «${item.name.toLowerCase()}» и зафиксировать эффект.`,
-    }))
+
+  const growthAreas = lowEvidence
+    ? buildInsufficientEvidenceGrowth(dimensions, answers)
+    : weakDimensions.map((item) => {
+        const coach = DIMENSION_COACHING[item.id]
+        const snippet = evidenceSnippet(answers, item.id)
+        const hasEvidence = dimensionHasEvidence(answers, item.id)
+        const gap = coach.gap(nextGrade, item.score)
+        return {
+          title: item.name,
+          reason: !hasEvidence
+            ? `По «${item.name.toLowerCase()}» почти нет рабочего кейса (${item.score.toFixed(1)}/4), поэтому просадка здесь ожидаема.`
+            : snippet
+              ? `${gap} В ответах это пока опирается на: «${snippet}${snippet.length >= 120 ? "…" : ""}».`
+              : gap,
+          nextStep: coach.action(nextGrade),
+        }
+      })
 
   const market = getMarketId(answers)
   const employment = getEmploymentId(answers)
@@ -341,16 +662,37 @@ function buildLocalResult(answers: InterviewAnswer[]): GradeResult {
   const confidence: EvidenceConfidence =
     overallConfidence >= 0.8 ? "high" : overallConfidence >= 0.6 ? "medium" : "low"
 
+  const growthIds = (
+    lowEvidence
+      ? [...dimensions].sort((a, b) => a.score - b.score).slice(0, 3)
+      : weakDimensions
+  ).map((item) => item.id)
+
+  const summary =
+    evidenceCount === 0
+      ? `Реальных рабочих примеров почти не было — в основном номера вариантов и «не могу вспомнить». Поэтому грейд специально консервативный (${grade}), а уверенность низкая. Самооценка без кейса не поднимает уровень.`
+      : evidenceCount < 2
+        ? `Примеров мало (${evidenceCount}), поэтому оценка осторожная: ${grade}. Там, где не было кейса, высокие варианты ответа почти не учитывались.`
+        : `По реальным примерам это ближе к ${grade}. Смотрели на то, что вы делали, а не на самооценку.`
+
   return {
     grade,
     score,
     confidence: Number(overallConfidence.toFixed(2)),
-    summary: `По реальным примерам это ближе к ${grade}. Смотрели на то, что вы делали, а не на самооценку.`,
+    summary,
     dimensions,
     strengths:
       strengths.length > 0
         ? strengths
-        : [{ title: "Честная самооценка", reason: "Ответы не выглядят раздутыми — это хороший сигнал." }],
+        : [
+            {
+              title: "Честность про пробелы",
+              reason:
+                evidenceCount === 0
+                  ? "Вы прямо отмечали, где нет примера — это полезнее, чем натянутая самооценка. Но для сильных сторон нужны рабочие кейсы."
+                  : "Ответы не выглядят раздутыми — это хороший сигнал, но сильных подтверждённых кейсов пока мало.",
+            },
+          ],
     growthAreas:
       growthAreas.length > 0
         ? growthAreas
@@ -358,7 +700,8 @@ function buildLocalResult(answers: InterviewAnswer[]): GradeResult {
             {
               title: "Доказательства эффекта",
               reason: "Пока мало опоры на измеримый результат.",
-              nextStep: "Для следующих задач заранее фиксируйте метрику успеха и итог после релиза.",
+              nextStep:
+                "Для следующих задач заранее фиксируйте метрику успеха, baseline и итог после релиза.",
             },
           ],
     nextGrade: {
@@ -367,7 +710,7 @@ function buildLocalResult(answers: InterviewAnswer[]): GradeResult {
         growthAreas.length > 0
           ? growthAreas.map((item) => item.title)
           : ["Более широкий ownership и повторяемый эффект"],
-      recommendedActions: growthAreas.map((item) => item.nextStep),
+      recommendedActions: buildNextGradeActions(grade, nextGrade, growthIds, evidenceCount),
     },
     compensation: {
       market: MARKET_LABELS[market] ?? "Другой рынок",
@@ -379,11 +722,13 @@ function buildLocalResult(answers: InterviewAnswer[]): GradeResult {
       fteHourlyEquivalent: hourly?.fte,
       freelanceHourlyRange: hourly?.freelance,
       marketPosition,
-      confidence: band ? confidence : "low",
+      confidence: band ? (evidenceCount < 2 ? "low" : confidence) : "low",
       note:
-        market === "other"
-          ? "Точный рынок не выбран, поэтому вилка — ориентир по международному remote в USD. Локальные цифры могут отличаться."
-          : undefined,
+        evidenceCount < 2
+          ? "Вилка ориентировочная: без рабочих примеров грейд и компенсация считаются консервативно."
+          : market === "other"
+            ? "Точный рынок не выбран, поэтому вилка — ориентир по международному remote в USD. Локальные цифры могут отличаться."
+            : undefined,
     },
   }
 }
@@ -471,6 +816,12 @@ function sanitizeStrengths(
   return cleaned.length > 0 ? cleaned : fallback
 }
 
+function looksTemplated(text: string): boolean {
+  return /Возьмите 1–2 задачи, где придётся проявить|Пока мало конкретных примеров на уровне|проявить «.+» и зафиксировать эффект/i.test(
+    text
+  )
+}
+
 function sanitizeGrowthAreas(
   value: unknown,
   fallback: GradeResult["growthAreas"]
@@ -484,11 +835,18 @@ function sanitizeGrowthAreas(
       const reason = asNonEmptyString(row.reason)
       const nextStep = asNonEmptyString(row.nextStep)
       if (!title || !reason || !nextStep) return null
+      if (looksTemplated(reason) || looksTemplated(nextStep)) return null
       return { title, reason, nextStep }
     })
     .filter((item): item is GradeResult["growthAreas"][number] => item !== null)
     .slice(0, 3)
-  return cleaned.length > 0 ? cleaned : fallback
+
+  // If the model mostly repeated one template, keep the richer local coaching copy.
+  const uniqueSteps = new Set(cleaned.map((item) => item.nextStep.toLowerCase()))
+  if (cleaned.length === 0 || (cleaned.length >= 2 && uniqueSteps.size === 1)) {
+    return fallback
+  }
+  return cleaned
 }
 
 function sanitizeNextGrade(
@@ -531,8 +889,18 @@ async function polishResult(result: GradeResult, answers: InterviewAnswer[]) {
   try {
     const polished = await polzaJson<Partial<GradeResult>>(
       `Ты калибруешь грейд продакт-дизайнера по behavioral-интервью. Не меняй grade, score и цифры компенсации.
-Пиши по-русски. summary — 3–5 конкретных наблюдений из примеров, без названий шкал и внутренних id.
-Self-rating игнорируй, если нет evidence. strengths максимум 3, growthAreas максимум 3, nextGrade — конкретные behaviors, не «нужно ещё 2 года».
+Пиши по-русски. Опирайся на факты из answers/evidence.
+
+Жёсткие правила:
+- Запрещены шаблоны вида «Возьмите 1–2 задачи, где придётся проявить «X»» и любые копипасты с подстановкой названия шкалы.
+- У каждой growthArea reason и nextStep должны быть уникальными по смыслу и действию. Нельзя повторять одну фразу с разными title.
+- nextStep — конкретное действие на 2–6 недель: что сделать, с кем, какой артефакт/метрика на выходе.
+- strengths только если есть реальный пример из answers; подпись варианта ответа (option label) evidence НЕ является.
+- Если человек писал «не могу вспомнить» или отвечал только номером — прямо скажи, что оценка ограничена нехваткой кейсов. Не выдумывай сильные стороны.
+- summary — 3–5 наблюдений по примерам, без названий внутренних id.
+- nextGrade.recommendedActions — 2–3 шага пути к следующему грейду, НЕ копируйте nextStep из growthAreas дословно.
+- Self-rating без evidence игнорируй.
+
 Верни JSON: summary, strengths, growthAreas, nextGrade.`,
       JSON.stringify({
         grade: result.grade,
@@ -544,7 +912,12 @@ Self-rating игнорируй, если нет evidence. strengths максим
           score: answer.score,
           evidence: answer.evidence,
         })),
-        current: result,
+        current: {
+          summary: result.summary,
+          strengths: result.strengths,
+          growthAreas: result.growthAreas,
+          nextGrade: result.nextGrade,
+        },
       })
     )
     return mergePolishedResult(result, polished)
@@ -602,19 +975,21 @@ export async function processInterviewTurn(input: {
       optionId = selected.map((option) => option.id).join(",")
       storedText = selected.map((option) => option.label).join(", ")
       if (isGradeRelevant(question)) {
-        score = scoreMultiSelect(
-          question,
-          selected.map((option) => option.id)
+        score = cappedSelfReportScore(
+          scoreMultiSelect(
+            question,
+            selected.map((option) => option.id)
+          )
         )
-        confidence = "medium"
+        confidence = "low"
       }
     } else {
       const llm = await scoreSelectFreeText(question, text)
       if (llm?.offTopic) {
         return { type: "off_topic", reply: OFF_TOPIC_REPLY, progress: progressNow }
       }
-      score = clampScore(llm?.score)
-      confidence = llm?.confidence ?? "low"
+      score = cappedSelfReportScore(clampScore(llm?.score))
+      confidence = "low"
       evidence = llm?.evidence
     }
   } else if (question.kind === "open" || (question.kind === "hybrid" && !question.options.length)) {
@@ -645,13 +1020,19 @@ export async function processInterviewTurn(input: {
     optionId = selected?.id
     const example = split.rest
     storedText = selected ? `${selected.label}${example ? `. ${example}` : ""}` : text
+    const skipped = isSkipExample(example || text)
+    const hasExample = Boolean(example) && !skipped && example.length >= 40
 
-    if (selected?.score !== undefined) {
-      score = selected.score
-      confidence = example.length >= 40 && !isSkipExample(example) ? "medium" : "low"
+    if (skipped) {
+      score = 1
+      confidence = "low"
+      evidence = "Пример пропущен"
+    } else if (selected?.score !== undefined) {
+      score = hasExample ? selected.score : cappedSelfReportScore(selected.score)
+      confidence = hasExample ? "medium" : "low"
     }
 
-    if (example && !isSkipExample(example) && example.length >= 40) {
+    if (hasExample) {
       const llm = await scoreOpenAnswer(question, `${selected?.label ?? ""}\n${example}`)
       if (llm?.offTopic) {
         return { type: "off_topic", reply: OFF_TOPIC_REPLY, progress: progressNow }
@@ -659,11 +1040,14 @@ export async function processInterviewTurn(input: {
       signals = signalsFromLlm(llm?.signals)
       if (typeof llm?.score === "number") {
         const llmScore = clampScore(llm.score) ?? score
-        score = score === undefined ? llmScore : (Math.round((score + (llmScore ?? score)) / 2) as 0 | 1 | 2 | 3 | 4)
+        score =
+          score === undefined
+            ? llmScore
+            : (Math.round((score + (llmScore ?? score)) / 2) as 0 | 1 | 2 | 3 | 4)
       }
       confidence = llm?.confidence ?? confidence
       evidence = llm?.evidence?.join("; ") ?? llm?.factualSummary
-    } else if (!selected) {
+    } else if (!selected && !skipped) {
       const llm = await scoreOpenAnswer(question, text)
       if (llm?.offTopic) {
         return { type: "off_topic", reply: OFF_TOPIC_REPLY, progress: progressNow }
@@ -672,8 +1056,6 @@ export async function processInterviewTurn(input: {
       score = clampScore(llm?.score) ?? heuristicOpenScore(text).score
       confidence = llm?.confidence ?? heuristicOpenScore(text).confidence
       evidence = llm?.evidence?.join("; ") ?? llm?.factualSummary
-    } else if (isSkipExample(example || text)) {
-      confidence = "low"
     }
   } else {
     const selected =
@@ -682,15 +1064,19 @@ export async function processInterviewTurn(input: {
     if (selected) {
       optionId = selected.id
       storedText = selected.label
-      score = selected.score
-      confidence = selected.score !== undefined ? "medium" : "low"
+      score = isGradeRelevant(question)
+        ? cappedSelfReportScore(selected.score)
+        : selected.score
+      confidence = "low"
     } else {
       const llm = await scoreSelectFreeText(question, text)
       if (llm?.offTopic) {
         return { type: "off_topic", reply: OFF_TOPIC_REPLY, progress: progressNow }
       }
-      score = clampScore(llm?.score)
-      confidence = llm?.confidence ?? "low"
+      score = isGradeRelevant(question)
+        ? cappedSelfReportScore(clampScore(llm?.score))
+        : clampScore(llm?.score)
+      confidence = "low"
       optionId = llm?.optionId ?? optionId
       evidence = llm?.evidence
     }

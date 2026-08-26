@@ -138,13 +138,23 @@ export function InterviewResultCard({ result }: { result: GradeResult }) {
           </h3>
           <p className="text-muted-foreground text-sm">
             Не хватает:{" "}
-            {missingSignals.length > 0 ? missingSignals.join(", ") : "больше подтверждённых примеров"}.
+            {missingSignals.length > 0
+              ? missingSignals.join(", ")
+              : "больше подтверждённых примеров"}
+            .
           </p>
           {recommendedActions.length > 0 ? (
             <ul className="list-disc space-y-1 pl-5 text-sm">
-              {recommendedActions.map((item, index) => (
-                <li key={`${item}-${index}`}>{item}</li>
-              ))}
+              {recommendedActions
+                .filter((item) => {
+                  const normalized = item.toLowerCase()
+                  return !growthAreas.some(
+                    (area) => asText(area?.nextStep).toLowerCase() === normalized
+                  )
+                })
+                .map((item, index) => (
+                  <li key={`${item}-${index}`}>{item}</li>
+                ))}
             </ul>
           ) : null}
         </section>
