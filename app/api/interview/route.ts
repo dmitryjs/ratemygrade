@@ -24,7 +24,8 @@ export async function POST(req: Request) {
       optionId: body.optionId,
     })
     return NextResponse.json(result)
-  } catch {
+  } catch (error) {
+    console.error("[interview]", error)
     return NextResponse.json(
       { error: "Не удалось продолжить опрос" },
       { status: 500 }

@@ -101,10 +101,12 @@ export function InterviewChat({ header }: { header?: ReactNode }) {
         return
       }
 
-      setAnswers(payload.answers)
-      setProgress(payload.progress)
-
       if (payload.type === "next") {
+        if (!payload.question?.id) {
+          throw new Error("Сервер вернул следующий шаг без вопроса")
+        }
+        setAnswers(payload.answers ?? answers)
+        setProgress(payload.progress)
         setQuestion(payload.question)
         setMessages((current) => [
           ...current,
@@ -118,6 +120,12 @@ export function InterviewChat({ header }: { header?: ReactNode }) {
         return
       }
 
+      if (payload.type !== "result" || !payload.result) {
+        throw new Error("Сервер не вернул результат опроса")
+      }
+
+      setAnswers(payload.answers ?? answers)
+      setProgress(payload.progress)
       setDone(true)
       setMessages((current) => [
         ...current,

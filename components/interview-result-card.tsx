@@ -13,14 +13,43 @@ const POSITION_LABEL: Record<
   "significantly above": "существенно выше рынка",
 }
 
+function asText(value: unknown, fallback = "—"): string {
+  return typeof value === "string" && value.trim() ? value : fallback
+}
+
 export function InterviewResultCard({ result }: { result: GradeResult }) {
-  const confidencePct = Math.round(result.confidence * 100)
+  const confidence = typeof result.confidence === "number" ? result.confidence : 0
+  const confidencePct = Math.round(confidence * 100)
+  const compensation = result.compensation ?? {
+    market: "Другой рынок",
+    confidence: "low" as const,
+  }
+  const strengths = Array.isArray(result.strengths) ? result.strengths : []
+  const growthAreas = Array.isArray(result.growthAreas) ? result.growthAreas : []
+  const nextGrade = result.nextGrade ?? {
+    grade: "следующий уровень",
+    missingSignals: [] as string[],
+    recommendedActions: [] as string[],
+  }
+  const missingSignals = Array.isArray(nextGrade.missingSignals)
+    ? nextGrade.missingSignals.filter((item): item is string => typeof item === "string")
+    : []
+  const recommendedActions = Array.isArray(nextGrade.recommendedActions)
+    ? nextGrade.recommendedActions.filter((item): item is string => typeof item === "string")
+    : []
+  const marketPosition = compensation.marketPosition
+  const positionLabel =
+    marketPosition && marketPosition in POSITION_LABEL
+      ? POSITION_LABEL[marketPosition]
+      : undefined
 
   return (
     <Card className="w-full max-w-2xl border-border/80 bg-card/95 py-5 shadow-sm">
       <CardHeader className="gap-3 px-5">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="rounded-full px-3 py-1 text-sm">{result.grade}</Badge>
+          <Badge className="rounded-full px-3 py-1 text-sm">
+            {asText(result.grade, "Грейд")}
+          </Badge>
           <span className="text-muted-foreground text-xs">
             уверенность {confidencePct}%
           </span>
@@ -30,73 +59,94 @@ export function InterviewResultCard({ result }: { result: GradeResult }) {
       <CardContent className="space-y-5 px-5">
         <section className="space-y-2">
           <h3 className="font-medium text-sm">Почему такой грейд</h3>
-          <p className="text-muted-foreground text-sm leading-relaxed">{result.summary}</p>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            {asText(result.summary, "Недостаточно данных для подробного разбора.")}
+          </p>
         </section>
 
         <section className="space-y-2">
           <h3 className="font-medium text-sm">Компенсация</h3>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Fact label="Рынок" value={result.compensation.market} />
-            <Fact label="Сейчас" value={result.compensation.current ?? "не указано"} />
+            <Fact label="Рынок" value={asText(compensation.market, "не указано")} />
+            <Fact label="Сейчас" value={asText(compensation.current, "не указано")} />
             <Fact
               label="Рекомендуемая вилка"
-              value={result.compensation.recommendedRange ?? "мало данных по рынку"}
+              value={asText(compensation.recommendedRange, "мало данных по рынку")}
             />
-            <Fact label="Целевая вилка" value={result.compensation.targetAsk ?? "—"} />
+            <Fact label="Целевая вилка" value={asText(compensation.targetAsk)} />
             <Fact
               label="FTE-эквивалент"
-              value={result.compensation.fteHourlyEquivalent ?? "—"}
+              value={asText(compensation.fteHourlyEquivalent)}
             />
             <Fact
               label="Контракт / фриланс"
-              value={result.compensation.freelanceHourlyRange ?? "—"}
+              value={asText(compensation.freelanceHourlyRange)}
             />
           </div>
-          {result.compensation.marketPosition ? (
-            <p className="text-muted-foreground text-xs">
-              Позиция: {POSITION_LABEL[result.compensation.marketPosition]}
-            </p>
+          {positionLabel ? (
+            <p className="text-muted-foreground text-xs">Позиция: {positionLabel}</p>
           ) : null}
-          {result.compensation.note ? (
-            <p className="text-muted-foreground text-xs">{result.compensation.note}</p>
+          {compensation.note ? (
+            <p className="text-muted-foreground text-xs">{compensation.note}</p>
           ) : null}
         </section>
 
         <section className="space-y-2">
           <h3 className="font-medium text-sm">Сильные стороны</h3>
-          <ul className="space-y-2">
-            {result.strengths.map((item) => (
-              <li key={item.title} className="rounded-xl bg-muted/60 px-3 py-2">
-                <div className="font-medium text-sm">{item.title}</div>
-                <p className="text-muted-foreground text-sm">{item.reason}</p>
-              </li>
-            ))}
-          </ul>
+          {strengths.length > 0 ? (
+            <ul className="space-y-2">
+              {strengths.map((item, index) => (
+                <li
+                  key={`${asText(item?.title, "strength")}-${index}`}
+                  className="rounded-xl bg-muted/60 px-3 py-2"
+                >
+                  <div className="font-medium text-sm">{asText(item?.title, "Сильная сторона")}</div>
+                  <p className="text-muted-foreground text-sm">{asText(item?.reason)}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-sm">Пока мало явных сильных сигналов.</p>
+          )}
         </section>
 
         <section className="space-y-2">
           <h3 className="font-medium text-sm">Что подтянуть</h3>
-          <ul className="space-y-2">
-            {result.growthAreas.map((item) => (
-              <li key={item.title} className="rounded-xl bg-muted/60 px-3 py-2">
-                <div className="font-medium text-sm">{item.title}</div>
-                <p className="text-muted-foreground text-sm">{item.reason}</p>
-                <p className="mt-1 text-sm">{item.nextStep}</p>
-              </li>
-            ))}
-          </ul>
+          {growthAreas.length > 0 ? (
+            <ul className="space-y-2">
+              {growthAreas.map((item, index) => (
+                <li
+                  key={`${asText(item?.title, "growth")}-${index}`}
+                  className="rounded-xl bg-muted/60 px-3 py-2"
+                >
+                  <div className="font-medium text-sm">{asText(item?.title, "Зона роста")}</div>
+                  <p className="text-muted-foreground text-sm">{asText(item?.reason)}</p>
+                  {item?.nextStep ? (
+                    <p className="mt-1 text-sm">{asText(item.nextStep)}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-sm">Явных зон роста не выделено.</p>
+          )}
         </section>
 
         <section className="space-y-2">
-          <h3 className="font-medium text-sm">Следующий уровень: {result.nextGrade.grade}</h3>
+          <h3 className="font-medium text-sm">
+            Следующий уровень: {asText(nextGrade.grade, "следующий уровень")}
+          </h3>
           <p className="text-muted-foreground text-sm">
-            Не хватает: {result.nextGrade.missingSignals.join(", ")}.
+            Не хватает:{" "}
+            {missingSignals.length > 0 ? missingSignals.join(", ") : "больше подтверждённых примеров"}.
           </p>
-          <ul className="list-disc space-y-1 pl-5 text-sm">
-            {result.nextGrade.recommendedActions.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          {recommendedActions.length > 0 ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {recommendedActions.map((item, index) => (
+                <li key={`${item}-${index}`}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       </CardContent>
     </Card>

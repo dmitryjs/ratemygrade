@@ -230,6 +230,11 @@ function pickAdaptive(answers: InterviewAnswer[]): string[] {
   return ids.slice(0, MAX_ADAPTIVE)
 }
 
+function coreOnlyAnswers(answers: InterviewAnswer[]): InterviewAnswer[] {
+  const coreIds = new Set<string>(CORE_QUESTION_IDS)
+  return answers.filter((answer) => coreIds.has(answer.questionId))
+}
+
 function interviewPlan(answers: InterviewAnswer[]) {
   const coreDone = CORE_QUESTION_IDS.every((id) =>
     answers.some((answer) => answer.questionId === id)
@@ -241,7 +246,10 @@ function interviewPlan(answers: InterviewAnswer[]) {
     return { phase: "core" as const, nextId, total: BASE_TOTAL }
   }
 
-  const adaptiveIds = pickAdaptive(answers)
+  // Freeze adaptive set from core answers only — otherwise each adaptive
+  // reply can reshuffle pickAdaptive() and the interview never reaches "done"
+  // or progress jumps (32 → 31) mid-flow.
+  const adaptiveIds = pickAdaptive(coreOnlyAnswers(answers))
   const total = CORE_QUESTION_IDS.length + adaptiveIds.length + COMPENSATION_IDS.length
   const adaptiveDone = adaptiveIds.every((id) =>
     answers.some((answer) => answer.questionId === id)
@@ -439,32 +447,109 @@ function signalsFromLlm(
   return Object.keys(signals).length > 0 ? signals : undefined
 }
 
-async function polishResult(result: GradeResult, answers: InterviewAnswer[]) {
-  const polished = await polzaJson<Partial<GradeResult>>(
-    `Ты калибруешь грейд продакт-дизайнера по behavioral-интервью. Не меняй grade, score и цифры компенсации.
-Пиши по-русски. summary — 3–5 конкретных наблюдений из примеров, без названий шкал и внутренних id.
-Self-rating игнорируй, если нет evidence. strengths максимум 3, growthAreas максимум 3, nextGrade — конкретные behaviors, не «нужно ещё 2 года».
-Верни JSON: summary, strengths, growthAreas, nextGrade.`,
-    JSON.stringify({
-      grade: result.grade,
-      score: result.score,
-      dimensions: result.dimensions,
-      answers: answers.map((answer) => ({
-        questionId: answer.questionId,
-        text: answer.text,
-        score: answer.score,
-        evidence: answer.evidence,
-      })),
-      current: result,
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+function sanitizeStrengths(
+  value: unknown,
+  fallback: GradeResult["strengths"]
+): GradeResult["strengths"] {
+  if (!Array.isArray(value)) return fallback
+  const cleaned = value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null
+      const row = item as Record<string, unknown>
+      const title = asNonEmptyString(row.title)
+      const reason = asNonEmptyString(row.reason)
+      if (!title || !reason) return null
+      const evidence = asNonEmptyString(row.evidence)
+      return evidence ? { title, reason, evidence } : { title, reason }
     })
-  )
+    .filter((item): item is GradeResult["strengths"][number] => item !== null)
+    .slice(0, 3)
+  return cleaned.length > 0 ? cleaned : fallback
+}
+
+function sanitizeGrowthAreas(
+  value: unknown,
+  fallback: GradeResult["growthAreas"]
+): GradeResult["growthAreas"] {
+  if (!Array.isArray(value)) return fallback
+  const cleaned = value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null
+      const row = item as Record<string, unknown>
+      const title = asNonEmptyString(row.title)
+      const reason = asNonEmptyString(row.reason)
+      const nextStep = asNonEmptyString(row.nextStep)
+      if (!title || !reason || !nextStep) return null
+      return { title, reason, nextStep }
+    })
+    .filter((item): item is GradeResult["growthAreas"][number] => item !== null)
+    .slice(0, 3)
+  return cleaned.length > 0 ? cleaned : fallback
+}
+
+function sanitizeNextGrade(
+  value: unknown,
+  fallback: GradeResult["nextGrade"]
+): GradeResult["nextGrade"] {
+  if (!value || typeof value !== "object") return fallback
+  const row = value as Record<string, unknown>
+  const grade = asNonEmptyString(row.grade) ?? fallback.grade
+  const missingSignals = Array.isArray(row.missingSignals)
+    ? row.missingSignals.map(asNonEmptyString).filter((item): item is string => !!item)
+    : fallback.missingSignals
+  const recommendedActions = Array.isArray(row.recommendedActions)
+    ? row.recommendedActions.map(asNonEmptyString).filter((item): item is string => !!item)
+    : fallback.recommendedActions
+  return {
+    grade,
+    missingSignals: missingSignals.length > 0 ? missingSignals : fallback.missingSignals,
+    recommendedActions:
+      recommendedActions.length > 0 ? recommendedActions : fallback.recommendedActions,
+  }
+}
+
+/** Ensures the result card never receives a malformed LLM payload. */
+export function mergePolishedResult(
+  result: GradeResult,
+  polished: Partial<GradeResult> | null | undefined
+): GradeResult {
   if (!polished) return result
   return {
     ...result,
-    summary: polished.summary ?? result.summary,
-    strengths: polished.strengths ?? result.strengths,
-    growthAreas: polished.growthAreas ?? result.growthAreas,
-    nextGrade: polished.nextGrade ?? result.nextGrade,
+    summary: asNonEmptyString(polished.summary) ?? result.summary,
+    strengths: sanitizeStrengths(polished.strengths, result.strengths),
+    growthAreas: sanitizeGrowthAreas(polished.growthAreas, result.growthAreas),
+    nextGrade: sanitizeNextGrade(polished.nextGrade, result.nextGrade),
+  }
+}
+
+async function polishResult(result: GradeResult, answers: InterviewAnswer[]) {
+  try {
+    const polished = await polzaJson<Partial<GradeResult>>(
+      `Ты калибруешь грейд продакт-дизайнера по behavioral-интервью. Не меняй grade, score и цифры компенсации.
+Пиши по-русски. summary — 3–5 конкретных наблюдений из примеров, без названий шкал и внутренних id.
+Self-rating игнорируй, если нет evidence. strengths максимум 3, growthAreas максимум 3, nextGrade — конкретные behaviors, не «нужно ещё 2 года».
+Верни JSON: summary, strengths, growthAreas, nextGrade.`,
+      JSON.stringify({
+        grade: result.grade,
+        score: result.score,
+        dimensions: result.dimensions,
+        answers: answers.map((answer) => ({
+          questionId: answer.questionId,
+          text: answer.text,
+          score: answer.score,
+          evidence: answer.evidence,
+        })),
+        current: result,
+      })
+    )
+    return mergePolishedResult(result, polished)
+  } catch {
+    return result
   }
 }
 
@@ -628,7 +713,12 @@ export async function processInterviewTurn(input: {
   const progress = { current: nextAnswers.length, total: plan.total }
 
   if (plan.phase === "done" || !plan.nextId) {
-    const result = await polishResult(buildLocalResult(nextAnswers), nextAnswers)
+    let result: GradeResult
+    try {
+      result = await polishResult(buildLocalResult(nextAnswers), nextAnswers)
+    } catch {
+      result = buildLocalResult(nextAnswers)
+    }
     return {
       type: "result",
       reply: "Спасибо. Ниже — грейд, вилка, ставка и что подтянуть.",
@@ -640,7 +730,20 @@ export async function processInterviewTurn(input: {
 
   const nextQuestion = getQuestion(plan.nextId, nextAnswers)
   if (!nextQuestion) {
-    return { type: "off_topic", reply: OFF_TOPIC_REPLY, progress }
+    // Missing question definition should not soft-lock the interview as "off topic".
+    let result: GradeResult
+    try {
+      result = await polishResult(buildLocalResult(nextAnswers), nextAnswers)
+    } catch {
+      result = buildLocalResult(nextAnswers)
+    }
+    return {
+      type: "result",
+      reply: "Спасибо. Ниже — грейд, вилка, ставка и что подтянуть.",
+      result,
+      progress: { current: nextAnswers.length, total: nextAnswers.length },
+      answers: nextAnswers,
+    }
   }
 
   const prefix = [ACK[nextAnswers.length % ACK.length]]
