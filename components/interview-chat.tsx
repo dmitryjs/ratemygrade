@@ -34,12 +34,48 @@ type ChatItem = {
   result?: GradeResult
 }
 
+function useVisibleFrame() {
+  const [frame, setFrame] = useState({
+    keyboardOpen: false,
+    height: 0,
+    offsetTop: 0,
+  })
+
+  useEffect(() => {
+    const viewport = window.visualViewport
+
+    const update = () => {
+      const height = viewport?.height ?? window.innerHeight
+      const offsetTop = viewport?.offsetTop ?? 0
+      const covered = Math.max(0, window.innerHeight - height - offsetTop)
+      setFrame({
+        keyboardOpen: covered > 80,
+        height,
+        offsetTop,
+      })
+    }
+
+    update()
+    viewport?.addEventListener("resize", update)
+    viewport?.addEventListener("scroll", update)
+    window.addEventListener("orientationchange", update)
+    return () => {
+      viewport?.removeEventListener("resize", update)
+      viewport?.removeEventListener("scroll", update)
+      window.removeEventListener("orientationchange", update)
+    }
+  }, [])
+
+  return frame
+}
+
 const GREETING =
-  "Я задам вопросы про вашу реальную работу за последние 12–24 месяца — не про должность в резюме. Где можно, ответьте примером из практики. Если не вспоминается кейс, так и напишите. Если сообщение не про текущий вопрос, я вежливо верну нас к опросу."
+  "Я задам вопросы про вашу реальную работу за последние 12–24 месяца — не про должность в резюме. Где есть варианты, можно номер или свой текст. Где нужен пример — своими словами, без номера. Enter начинает новую строку, отправка — кнопкой."
 
 export function InterviewChat({ header }: { header?: ReactNode }) {
   const firstQuestion = useMemo(() => getFirstQuestion(), [])
   const scrollRef = useRef<HTMLDivElement>(null)
+  const { keyboardOpen, height, offsetTop } = useVisibleFrame()
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
   const [answers, setAnswers] = useState<InterviewAnswer[]>([])
@@ -56,10 +92,15 @@ export function InterviewChat({ header }: { header?: ReactNode }) {
   ])
 
   useEffect(() => {
+    document.documentElement.classList.add("interview-active")
+    return () => document.documentElement.classList.remove("interview-active")
+  }, [])
+
+  useEffect(() => {
     const node = scrollRef.current
     if (!node) return
-    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" })
-  }, [messages, busy])
+    node.scrollTo({ top: node.scrollHeight, behavior: keyboardOpen ? "auto" : "smooth" })
+  }, [messages, busy, keyboardOpen, height])
 
   async function send(text: string) {
     const trimmed = text.trim()
@@ -142,8 +183,7 @@ export function InterviewChat({ header }: { header?: ReactNode }) {
         {
           id: nanoid(),
           role: "assistant",
-          content:
-            "Не получилось отправить ответ. Попробуйте ещё раз.",
+          content: "Не получилось отправить ответ. Попробуйте ещё раз.",
           question,
         },
       ])
@@ -157,9 +197,21 @@ export function InterviewChat({ header }: { header?: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col overscroll-none"
+      style={
+        keyboardOpen
+          ? {
+              height,
+              maxHeight: height,
+              transform: `translateY(${offsetTop}px)`,
+              flex: "none",
+            }
+          : undefined
+      }
+    >
       <div ref={scrollRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
-        {header}
+        {keyboardOpen ? null : header}
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 py-2 pb-6">
           {messages.map((item) => (
             <Message from={item.role} key={item.id}>
@@ -175,17 +227,26 @@ export function InterviewChat({ header }: { header?: ReactNode }) {
         </div>
       </div>
 
-      <div className="shrink-0 bg-background pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div
+        className={
+          keyboardOpen
+            ? "shrink-0 bg-background pt-2 pb-2"
+            : "shrink-0 bg-background pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        }
+      >
         <div className="mx-auto w-full max-w-2xl">
-          <div className="mb-2 flex items-center justify-between gap-3 px-1">
-            <p className="text-muted-foreground text-sm">Вопрос</p>
-            <p className="font-mono text-sm tabular-nums">
-              {progress.current} / {progress.total}
-            </p>
-          </div>
+          {keyboardOpen ? null : (
+            <div className="mb-2 flex items-center justify-between gap-3 px-1">
+              <p className="text-muted-foreground text-sm">Вопрос</p>
+              <p className="font-mono text-sm tabular-nums">
+                {progress.current} / {progress.total}
+              </p>
+            </div>
+          )}
           <PromptInput onSubmit={onSubmit}>
             <PromptInputBody>
               <PromptInputTextarea
+                className={keyboardOpen ? "max-h-[min(10rem,34svh)]" : undefined}
                 disabled={busy || done}
                 onChange={(event) => setInput(event.currentTarget.value)}
                 placeholder={placeholderFor(question, done)}

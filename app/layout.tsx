@@ -1,4 +1,5 @@
 import { Inter, JetBrains_Mono } from "next/font/google"
+import type { Viewport } from "next"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -13,6 +14,13 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin", "cyrillic"],
   variable: "--font-mono",
 })
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "overlays-content",
+}
 
 export default function RootLayout({
   children,

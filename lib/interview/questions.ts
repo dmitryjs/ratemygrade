@@ -136,8 +136,8 @@ const CORE_QUESTIONS: Question[] = [
     kind: "hybrid",
     dimension: "scope_ownership",
     text: "Какой масштаб задач для вас обычный, а не исключение?",
-    followUp: "После выбора приведите короткий пример задачи такого масштаба.",
-    placeholder: "Номер варианта и короткий пример",
+    followUp: "Можно номер, а можно сразу короткий пример такого масштаба своими словами.",
+    placeholder: "Номер или сразу пример своими словами",
     options: numbered([
       ["Отдельные экраны", 1],
       ["Небольшие фичи", 2],
@@ -186,8 +186,8 @@ const CORE_QUESTIONS: Question[] = [
     extraDimensions: ["research"],
     text: "Как вы обычно понимаете, что дизайн решил проблему?",
     followUp:
-      "После выбора расскажите про последний случай, когда вы реально проверяли результат после релиза.",
-    placeholder: "Номер варианта и короткий пример",
+      "Можно номер, а можно сразу рассказать про последний случай, когда вы проверяли результат после релиза.",
+    placeholder: "Номер или сразу пример своими словами",
     options: numbered([
       ["По субъективной оценке команды", 1],
       ["По пользовательскому фидбеку", 2],
@@ -273,8 +273,8 @@ const CORE_QUESTIONS: Question[] = [
     kind: "hybrid",
     dimension: "systems_thinking",
     text: "Какой у вас реальный опыт с дизайн-системами?",
-    followUp: "После выбора: какое самое системное изменение в design system сделали лично вы?",
-    placeholder: "Номер варианта и короткий пример",
+    followUp: "Можно номер, а можно сразу пример: какое самое системное изменение в design system сделали лично вы?",
+    placeholder: "Номер или сразу пример своими словами",
     options: numbered([
       ["В основном использую готовую", 1],
       ["Создавал компоненты", 2],
@@ -373,8 +373,8 @@ const CORE_QUESTIONS: Question[] = [
     kind: "hybrid",
     dimension: "leadership",
     text: "Как вы обычно помогаете другим дизайнерам становиться сильнее?",
-    followUp: "После выбора приведите один конкретный пример.",
-    placeholder: "Номер варианта и короткий пример",
+    followUp: "Можно номер, а можно сразу один конкретный пример.",
+    placeholder: "Номер или сразу пример своими словами",
     options: numbered([
       ["Почти не взаимодействую", 0],
       ["Даю ситуативный feedback", 1],
@@ -591,11 +591,11 @@ export function isSkipExample(text: string): boolean {
 
 export function placeholderFor(question: Question, done = false): string {
   if (done) return "Опрос завершён"
-  if (question.placeholder) return question.placeholder
-  if (question.kind === "multi_select") return "Номера через запятую или свой ответ"
   if (question.kind === "open") return OPEN_HINT
-  if (question.kind === "hybrid") return "Номер варианта и короткий пример"
-  return "Номер варианта или свой ответ"
+  if (question.kind === "hybrid") return "Номер или сразу пример своими словами"
+  if (question.kind === "multi_select") return "Номера через запятую или свой ответ текстом"
+  if (question.placeholder) return question.placeholder
+  return "Номер варианта или свой ответ текстом"
 }
 
 export function formatQuestionMessage(question: Question): string {
@@ -609,20 +609,23 @@ export function formatQuestionMessage(question: Question): string {
       .join("\n")
     parts.push(options)
   }
+  if (question.kind === "single_select") {
+    parts.push("Можно номер или свой ответ текстом.")
+  }
   if (question.kind === "multi_select") {
-    parts.push("Можно несколько номеров через запятую.")
+    parts.push("Можно несколько номеров через запятую или описать текстом.")
   }
   if (question.followUp) {
     parts.push(question.followUp)
   }
-  if (
-    (question.kind === "open" || question.kind === "hybrid") &&
-    question.phase !== "compensation"
-  ) {
-    if (question.placeholder && question.placeholder !== question.text) {
-      parts.push(question.placeholder)
-    }
-    parts.push(SKIP_HINT)
+  if (question.kind === "open") {
+    parts.push("Ответьте своими словами — номер варианта здесь не нужен.")
+    parts.push(question.placeholder ?? OPEN_HINT)
+    if (question.phase !== "compensation") parts.push(SKIP_HINT)
+  }
+  if (question.kind === "hybrid") {
+    parts.push("Можно номер и пример или сразу описать своими словами.")
+    if (question.phase !== "compensation") parts.push(SKIP_HINT)
   }
   return parts.join("\n\n")
 }

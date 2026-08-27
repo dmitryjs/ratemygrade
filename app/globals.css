@@ -132,6 +132,12 @@
   body::-webkit-scrollbar {
     display: none;
     }
+  html.interview-active,
+  html.interview-active body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
 }
 
 @layer utilities {

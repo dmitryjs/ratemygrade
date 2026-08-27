@@ -43,7 +43,9 @@ export default function Page() {
     <main
       className={cn(
         "px-4 sm:px-8 lg:px-[120px]",
-        started ? "flex h-dvh flex-col overflow-hidden pt-4" : "py-6 sm:py-8"
+        started
+          ? "flex h-dvh max-h-dvh flex-col overflow-hidden pt-4"
+          : "py-6 sm:py-8"
       )}
     >
       <div

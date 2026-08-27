@@ -67,12 +67,15 @@ export const PromptInputBody = ({
   <div className={cn("flex flex-col", className)} {...props} />
 )
 
-export type PromptInputTextareaProps = ComponentProps<typeof Textarea>
+export type PromptInputTextareaProps = ComponentProps<typeof Textarea> & {
+  submitOnEnter?: boolean
+}
 
 export const PromptInputTextarea = ({
   className,
   onKeyDown,
   placeholder = "What would you like to know?",
+  submitOnEnter = false,
   ...props
 }: PromptInputTextareaProps) => {
   const [isComposing, setIsComposing] = useState(false)
@@ -80,6 +83,7 @@ export const PromptInputTextarea = ({
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
     onKeyDown?.(event)
     if (event.defaultPrevented) return
+    if (!submitOnEnter) return
     if (event.key !== "Enter") return
     if (isComposing || event.nativeEvent.isComposing || event.shiftKey) return
     event.preventDefault()
@@ -93,9 +97,10 @@ export const PromptInputTextarea = ({
   return (
     <Textarea
       className={cn(
-        "min-h-12 rounded-xl border-0 bg-transparent px-3 py-2 shadow-none focus-visible:border-transparent focus-visible:ring-0",
+        "max-h-[min(12rem,36dvh)] min-h-12 overflow-y-auto rounded-xl border-0 bg-transparent px-3 py-2 shadow-none focus-visible:border-transparent focus-visible:ring-0",
         className
       )}
+      enterKeyHint="enter"
       name="message"
       onCompositionEnd={() => setIsComposing(false)}
       onCompositionStart={() => setIsComposing(true)}
