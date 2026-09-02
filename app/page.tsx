@@ -4,6 +4,7 @@ import { InterviewChat } from "@/components/interview-chat"
 import { ThemeToggleTabs } from "@/components/theme-toggle-tabs"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { useVisualViewportLock } from "@/lib/use-visual-viewport-lock"
 import Link from "next/link"
 import { useState } from "react"
 
@@ -38,13 +39,15 @@ function Brand() {
 
 export default function Page() {
   const [started, setStarted] = useState(false)
+  const shellRef = useVisualViewportLock<HTMLElement>(started)
 
   return (
     <main
+      ref={shellRef}
       className={cn(
         "px-4 sm:px-8 lg:px-[120px]",
         started
-          ? "flex h-dvh max-h-dvh flex-col overflow-hidden pt-4"
+          ? "group/app flex h-dvh max-h-dvh flex-col overflow-hidden bg-background pt-4"
           : "py-6 sm:py-8"
       )}
     >
@@ -64,7 +67,7 @@ export default function Page() {
         {started ? (
           <InterviewChat
             header={
-              <header className="pt-10 pb-6 text-center sm:pt-0">
+              <header className="pt-10 pb-6 text-center sm:pt-0 group-data-[keyboard-open=true]/app:hidden">
                 <Brand />
               </header>
             }

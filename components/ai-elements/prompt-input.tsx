@@ -97,7 +97,7 @@ export const PromptInputTextarea = ({
   return (
     <Textarea
       className={cn(
-        "max-h-[min(12rem,36dvh)] min-h-12 overflow-y-auto rounded-xl border-0 bg-transparent px-3 py-2 shadow-none focus-visible:border-transparent focus-visible:ring-0",
+        "max-h-[min(11rem,calc(var(--vv-height,100dvh)*0.28))] min-h-12 overflow-y-auto rounded-xl border-0 bg-transparent px-3 py-2 shadow-none focus-visible:border-transparent focus-visible:ring-0",
         className
       )}
       enterKeyHint="enter"
